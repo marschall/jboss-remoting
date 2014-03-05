@@ -450,7 +450,7 @@ final class ClientConnectionOpenListener implements ChannelListener<ConnectedMes
                         connection.getChannel().suspendReads();
                         final int negotiatedVersion = version;
                         final SaslClient usedSaslClient = saslClient;
-                        final Authentication authentication = new Authentication(usedSaslClient, remoteServerName, userName, theRemoteEndpointName, behavior, channelsIn, channelsOut);
+                        final Authentication authentication = new Authentication(usedSaslClient, remoteServerName, userName, theRemoteEndpointName, behavior, channelsIn, channelsOut, saslMechs.size() > 1);
                         connection.getExecutor().execute(new Runnable() {
                             public void run() {
                                 final byte[] response;
@@ -613,8 +613,9 @@ final class ClientConnectionOpenListener implements ChannelListener<ConnectedMes
         private final int behavior;
         private final int maxInboundChannels;
         private final int maxOutboundChannels;
+        private final boolean retryOnFailure;
 
-        Authentication(final SaslClient saslClient, final String serverName, final String authorizationID, final String remoteEndpointName, final int behavior, final int maxInboundChannels, final int maxOutboundChannels) {
+        Authentication(final SaslClient saslClient, final String serverName, final String authorizationID, final String remoteEndpointName, final int behavior, final int maxInboundChannels, final int maxOutboundChannels, final boolean retryOnFailure) {
             this.saslClient = saslClient;
             this.serverName = serverName;
             this.authorizationID = authorizationID;
@@ -622,6 +623,7 @@ final class ClientConnectionOpenListener implements ChannelListener<ConnectedMes
             this.behavior = behavior;
             this.maxInboundChannels = maxInboundChannels;
             this.maxOutboundChannels = maxOutboundChannels;
+            this.retryOnFailure = retryOnFailure;
         }
 
         public void handleEvent(final ConnectedMessageChannel channel) {
@@ -771,7 +773,11 @@ final class ClientConnectionOpenListener implements ChannelListener<ConnectedMes
                         client.debugf("Client received authentication rejected for mechanism %s", mechanismName);
                         failedMechs.put(mechanismName, "Server rejected authentication");
                         saslDispose(saslClient);
-                        sendCapRequest(serverName);
+                        if (retryOnFailure) {
+                          sendCapRequest(serverName);
+                        } else {
+                          connection.handleException(allMechanismsFailed());
+                        }
                         return;
                     }
                     default: {
